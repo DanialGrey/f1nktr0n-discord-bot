@@ -3,7 +3,6 @@ from discord.ext import commands, tasks
 import os
 import aiohttp
 from dotenv import load_dotenv
-from datetime import datetime
 
 load_dotenv()
 
@@ -74,7 +73,7 @@ class StreamNotify(commands.Cog):
             await ctx.send(f"🟢 F1NKST3R is LIVE!\n{stream['title']}")
         else:
             await ctx.send("🔴 Not live.")
-            
+
     @tasks.loop(minutes=3)
     async def check_streams(self):
         await self.bot.wait_until_ready()
