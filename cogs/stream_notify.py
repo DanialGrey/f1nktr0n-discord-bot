@@ -209,6 +209,17 @@ class StreamNotify(commands.Cog):
         await ctx.send(f"📢 Announcement channel set to {channel.mention}")
 
     @commands.command()
+    async def announcechannel(self, ctx):
+        """Displays the current announcement channel."""
+        config = self.load_config()
+        channel_id = config.get("announcement_channel_id")
+        channel = self.bot.get_channel(channel_id) if channel_id else None
+        if channel:
+            await ctx.send(f"📢 Current announcement channel is {channel.mention}")
+        else:
+            await ctx.send("⚠️ No announcement channel has been set yet.")
+
+    @commands.command()
     async def testyt(self, ctx):
         """Manually test YouTube upload detection."""
         video = await self.check_youtube_upload()
