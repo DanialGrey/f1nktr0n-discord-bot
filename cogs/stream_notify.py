@@ -54,14 +54,15 @@ class StreamNotify(commands.Cog):
                 return None
 
     async def check_youtube(self):
+        uploads_playlist = f"UU{YOUTUBE_CHANNEL_ID[2:]}"  # Convert channel ID to uploads playlist ID
         url = (
-            f"https://www.googleapis.com/youtube/v3/search?key={YOUTUBE_API_KEY}"
-            f"&channelId={YOUTUBE_CHANNEL_ID}&part=snippet,id&order=date&maxResults=1"
+            f"https://www.googleapis.com/youtube/v3/playlistItems"
+            f"?part=snippet&playlistId={uploads_playlist}&maxResults=1&key={YOUTUBE_API_KEY}"
         )
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 data = await resp.json()
-                if "items" in data:
+                if "items" in data and data["items"]:
                     return data["items"][0]
                 return None
 
@@ -100,7 +101,7 @@ class StreamNotify(commands.Cog):
         # --- YouTube ---
         video = await self.check_youtube()
         if video:
-            video_id = video["id"].get("videoId")
+            video_id = video["snippet"]["resourceId"]["videoId"]
             if video_id != self.last_youtube_video_id:
                 self.last_youtube_video_id = video_id
                 title = video["snippet"]["title"]
