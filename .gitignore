@@ -2,3 +2,4 @@
 venv/
 # Ignore dynamic data files
 data/known_youtube_ids.json
+data/bot_config.json

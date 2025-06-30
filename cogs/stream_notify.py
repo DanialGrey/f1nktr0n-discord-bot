@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Environment variables
-ANNOUNCE_CHANNEL_NAME = os.getenv("ANNOUNCEMENT_CHANNEL")
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
 TWITCH_USERNAME = os.getenv("TWITCH_USERNAME")
@@ -19,6 +18,7 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 # Data paths
 KNOWN_IDS_FILE = Path("data/known_youtube_ids.json")
+CONFIG_FILE = Path("data/bot_config.json")
 
 class StreamNotify(commands.Cog):
     def __init__(self, bot):
@@ -41,6 +41,17 @@ class StreamNotify(commands.Cog):
         KNOWN_IDS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(KNOWN_IDS_FILE, "w") as f:
             json.dump({"known_video_ids": list(known_ids)}, f, indent=2)
+
+    def load_config(self):
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, "r") as f:
+                return json.load(f)
+        return {"announcement_channel_id": None}
+
+    def save_config(self, config):
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
 
     async def get_twitch_token(self):
         url = "https://id.twitch.tv/oauth2/token"
@@ -108,7 +119,7 @@ class StreamNotify(commands.Cog):
                     video = data["items"][0]
                     video_id = video["id"]["videoId"]
 
-                    # Confirm it has actually started
+                    # Confirm it's actually live (not just scheduled)
                     video_url = (
                         f"https://www.googleapis.com/youtube/v3/videos"
                         f"?part=liveStreamingDetails&id={video_id}&key={YOUTUBE_API_KEY}"
@@ -118,13 +129,15 @@ class StreamNotify(commands.Cog):
                         if "items" in video_data and video_data["items"]:
                             details = video_data["items"][0].get("liveStreamingDetails", {})
                             if "actualStartTime" in details:
-                                return video  # it's live
+                                return video
         return None
 
     @tasks.loop(minutes=3)
     async def check_streams(self):
         await self.bot.wait_until_ready()
-        channel = discord.utils.get(self.bot.get_all_channels(), name=ANNOUNCE_CHANNEL_NAME)
+        config = self.load_config()
+        channel_id = config.get("announcement_channel_id")
+        channel = self.bot.get_channel(channel_id) if channel_id else None
         if not channel:
             return
 
@@ -185,6 +198,15 @@ class StreamNotify(commands.Cog):
             await channel.send(embed=embed)
         elif not yt_live:
             self.youtube_live = False
+
+    @commands.command()
+    @commands.has_permissions(manage_guild=True)
+    async def setannounce(self, ctx, channel: discord.TextChannel):
+        """Sets the announcement channel for stream notifications."""
+        config = self.load_config()
+        config["announcement_channel_id"] = channel.id
+        self.save_config(config)
+        await ctx.send(f"📢 Announcement channel set to {channel.mention}")
 
     @commands.command()
     async def testyt(self, ctx):
