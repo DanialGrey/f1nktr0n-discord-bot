@@ -3,7 +3,7 @@ from discord.ext import commands, tasks
 import os
 import aiohttp
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -17,7 +17,7 @@ TWITCH_USERNAME = os.getenv("TWITCH_USERNAME")
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# YouTube ID cache path
+# Data paths
 KNOWN_IDS_FILE = Path("data/known_youtube_ids.json")
 
 class StreamNotify(commands.Cog):
@@ -25,6 +25,7 @@ class StreamNotify(commands.Cog):
         self.bot = bot
         self.twitch_token = None
         self.twitch_streaming = False
+        self.youtube_live = False
         self.check_streams.start()
 
     def cog_unload(self):
@@ -70,11 +71,35 @@ class StreamNotify(commands.Cog):
                     return data["data"][0]
                 return None
 
-    async def check_youtube(self):
+    async def check_youtube_upload(self):
         uploads_playlist = f"UU{YOUTUBE_CHANNEL_ID[2:]}"
         url = (
             f"https://www.googleapis.com/youtube/v3/playlistItems"
             f"?part=snippet&playlistId={uploads_playlist}&maxResults=1&key={YOUTUBE_API_KEY}"
+        )
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                if "items" not in data or not data["items"]:
+                    return None
+
+                video = data["items"][0]
+                snippet = video["snippet"]
+                published_at = snippet["publishedAt"]
+                published_dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                if published_dt < datetime.now(timezone.utc) - timedelta(minutes=10):
+                    return None
+
+                title = snippet["title"].lower()
+                if any(x in title for x in ["shorts", "stream", "live"]):
+                    return None
+
+                return video
+
+    async def check_youtube_live(self):
+        url = (
+            f"https://www.googleapis.com/youtube/v3/search"
+            f"?part=snippet&channelId={YOUTUBE_CHANNEL_ID}&eventType=live&type=video&key={YOUTUBE_API_KEY}"
         )
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
@@ -90,25 +115,24 @@ class StreamNotify(commands.Cog):
         if not channel:
             return
 
-        # --- Twitch Check ---
+        # --- Twitch ---
         stream_data = await self.check_twitch()
         if stream_data and not self.twitch_streaming:
             self.twitch_streaming = True
             embed = discord.Embed(
                 title=f"🔴 {stream_data['title']}",
-                description="F1NKST3R just went live. Try not to disappoint him.",
+                description="F1NKST3R just went live on Twitch!",
                 color=0x0da2ff
             )
-            embed.add_field(name="📺 Watch Now", value=f"https://twitch.tv/{TWITCH_USERNAME}", inline=False)
+            embed.add_field(name="📺 Watch on Twitch", value=f"https://twitch.tv/{TWITCH_USERNAME}", inline=False)
             embed.set_footer(text="— F1NKTR0N")
             await channel.send(embed=embed)
-
         elif not stream_data:
             self.twitch_streaming = False
 
-        # --- YouTube Check ---
+        # --- YouTube Upload ---
         known_ids = self.load_known_ids()
-        video = await self.check_youtube()
+        video = await self.check_youtube_upload()
         if video:
             video_id = video["snippet"]["resourceId"]["videoId"]
             if video_id not in known_ids:
@@ -117,17 +141,55 @@ class StreamNotify(commands.Cog):
                 url = f"https://youtube.com/watch?v={video_id}"
 
                 embed = discord.Embed(
-                    title="📹 New Video!",
+                    title="📹 New YouTube Video!",
                     description=title,
                     color=0x0da2ff
                 )
                 embed.set_image(url=thumbnail)
-                embed.add_field(name="🎬 Watch it now", value=url, inline=False)
+                embed.add_field(name="🎬 Watch on YouTube", value=url, inline=False)
                 embed.set_footer(text="— F1NKTR0N")
 
                 await channel.send(embed=embed)
                 known_ids.add(video_id)
                 self.save_known_ids(known_ids)
+
+        # --- YouTube Live ---
+        yt_live = await self.check_youtube_live()
+        if yt_live and not self.youtube_live:
+            self.youtube_live = True
+            video_id = yt_live["id"]["videoId"]
+            title = yt_live["snippet"]["title"]
+            url = f"https://youtube.com/watch?v={video_id}"
+
+            embed = discord.Embed(
+                title="🔴 F1NKST3R is LIVE on YouTube!",
+                description=title,
+                color=0x0da2ff
+            )
+            embed.add_field(name="📺 Watch Now", value=url, inline=False)
+            embed.set_footer(text="— F1NKTR0N")
+
+            await channel.send(embed=embed)
+        elif not yt_live:
+            self.youtube_live = False
+
+    @commands.command()
+    async def testyt(self, ctx):
+        """Manually test YouTube upload detection."""
+        video = await self.check_youtube_upload()
+        if video:
+            await ctx.send(f"✅ Detected YouTube upload: {video['snippet']['title']}")
+        else:
+            await ctx.send("🔴 No new YouTube upload detected.")
+
+    @commands.command()
+    async def testytlive(self, ctx):
+        """Manually test YouTube livestream detection."""
+        live = await self.check_youtube_live()
+        if live:
+            await ctx.send(f"✅ Detected live YouTube stream: {live['snippet']['title']}")
+        else:
+            await ctx.send("🔴 F1NKST3R is not currently live on YouTube.")
 
 async def setup(bot):
     await bot.add_cog(StreamNotify(bot))
