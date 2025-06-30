@@ -97,16 +97,29 @@ class StreamNotify(commands.Cog):
                 return video
 
     async def check_youtube_live(self):
-        url = (
+        search_url = (
             f"https://www.googleapis.com/youtube/v3/search"
             f"?part=snippet&channelId={YOUTUBE_CHANNEL_ID}&eventType=live&type=video&key={YOUTUBE_API_KEY}"
         )
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
+            async with session.get(search_url) as resp:
                 data = await resp.json()
                 if "items" in data and data["items"]:
-                    return data["items"][0]
-                return None
+                    video = data["items"][0]
+                    video_id = video["id"]["videoId"]
+
+                    # Confirm it has actually started
+                    video_url = (
+                        f"https://www.googleapis.com/youtube/v3/videos"
+                        f"?part=liveStreamingDetails&id={video_id}&key={YOUTUBE_API_KEY}"
+                    )
+                    async with session.get(video_url) as video_resp:
+                        video_data = await video_resp.json()
+                        if "items" in video_data and video_data["items"]:
+                            details = video_data["items"][0].get("liveStreamingDetails", {})
+                            if "actualStartTime" in details:
+                                return video  # it's live
+        return None
 
     @tasks.loop(minutes=3)
     async def check_streams(self):
