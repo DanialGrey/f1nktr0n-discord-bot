@@ -2,10 +2,14 @@ import discord
 from discord.ext import commands, tasks
 import os
 import aiohttp
+import json
+from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Environment variables
 ANNOUNCE_CHANNEL_NAME = os.getenv("ANNOUNCEMENT_CHANNEL")
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET")
@@ -13,16 +17,29 @@ TWITCH_USERNAME = os.getenv("TWITCH_USERNAME")
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
+# YouTube ID cache path
+KNOWN_IDS_FILE = Path("data/known_youtube_ids.json")
+
 class StreamNotify(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.twitch_token = None
-        self.last_youtube_video_id = None
         self.twitch_streaming = False
         self.check_streams.start()
 
     def cog_unload(self):
         self.check_streams.cancel()
+
+    def load_known_ids(self):
+        if KNOWN_IDS_FILE.exists():
+            with open(KNOWN_IDS_FILE, "r") as f:
+                return set(json.load(f).get("known_video_ids", []))
+        return set()
+
+    def save_known_ids(self, known_ids):
+        KNOWN_IDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(KNOWN_IDS_FILE, "w") as f:
+            json.dump({"known_video_ids": list(known_ids)}, f, indent=2)
 
     async def get_twitch_token(self):
         url = "https://id.twitch.tv/oauth2/token"
@@ -54,7 +71,7 @@ class StreamNotify(commands.Cog):
                 return None
 
     async def check_youtube(self):
-        uploads_playlist = f"UU{YOUTUBE_CHANNEL_ID[2:]}"  # Convert channel ID to uploads playlist ID
+        uploads_playlist = f"UU{YOUTUBE_CHANNEL_ID[2:]}"
         url = (
             f"https://www.googleapis.com/youtube/v3/playlistItems"
             f"?part=snippet&playlistId={uploads_playlist}&maxResults=1&key={YOUTUBE_API_KEY}"
@@ -66,15 +83,6 @@ class StreamNotify(commands.Cog):
                     return data["items"][0]
                 return None
 
-    @commands.command()
-    async def testtwitch(self, ctx):
-        """Force-check the Twitch stream status manually."""
-        stream = await self.check_twitch()
-        if stream:
-            await ctx.send(f"🟢 F1NKST3R is LIVE!\n{stream['title']}")
-        else:
-            await ctx.send("🔴 Not live.")
-
     @tasks.loop(minutes=3)
     async def check_streams(self):
         await self.bot.wait_until_ready()
@@ -82,13 +90,13 @@ class StreamNotify(commands.Cog):
         if not channel:
             return
 
-        # --- Twitch ---
+        # --- Twitch Check ---
         stream_data = await self.check_twitch()
         if stream_data and not self.twitch_streaming:
             self.twitch_streaming = True
             embed = discord.Embed(
-                title="🔴 F1NKST3R is LIVE!",
-                description="Try not to embarrass yourself in chat.",
+                title=f"🔴 {stream_data['title']}",
+                description="F1NKST3R just went live. Try not to disappoint him.",
                 color=0x0da2ff
             )
             embed.add_field(name="📺 Watch Now", value=f"https://twitch.tv/{TWITCH_USERNAME}", inline=False)
@@ -98,22 +106,28 @@ class StreamNotify(commands.Cog):
         elif not stream_data:
             self.twitch_streaming = False
 
-        # --- YouTube ---
+        # --- YouTube Check ---
+        known_ids = self.load_known_ids()
         video = await self.check_youtube()
         if video:
             video_id = video["snippet"]["resourceId"]["videoId"]
-            if video_id != self.last_youtube_video_id:
-                self.last_youtube_video_id = video_id
+            if video_id not in known_ids:
                 title = video["snippet"]["title"]
+                thumbnail = video["snippet"]["thumbnails"]["high"]["url"]
                 url = f"https://youtube.com/watch?v={video_id}"
+
                 embed = discord.Embed(
                     title="📹 New Video!",
-                    description=f"{title}",
+                    description=title,
                     color=0x0da2ff
                 )
-                embed.add_field(name="🎬 Watch it", value=url, inline=False)
+                embed.set_image(url=thumbnail)
+                embed.add_field(name="🎬 Watch it now", value=url, inline=False)
                 embed.set_footer(text="— F1NKTR0N")
+
                 await channel.send(embed=embed)
+                known_ids.add(video_id)
+                self.save_known_ids(known_ids)
 
 async def setup(bot):
     await bot.add_cog(StreamNotify(bot))

@@ -1,2 +1,4 @@
 .env
 venv/
+# Ignore dynamic data files
+data/known_youtube_ids.json
