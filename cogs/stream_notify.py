@@ -66,6 +66,15 @@ class StreamNotify(commands.Cog):
                     return data["items"][0]
                 return None
 
+    @commands.command()
+    async def testtwitch(self, ctx):
+        """Force-check the Twitch stream status manually."""
+        stream = await self.check_twitch()
+        if stream:
+            await ctx.send(f"🟢 F1NKST3R is LIVE!\n{stream['title']}")
+        else:
+            await ctx.send("🔴 Not live.")
+            
     @tasks.loop(minutes=3)
     async def check_streams(self):
         await self.bot.wait_until_ready()
